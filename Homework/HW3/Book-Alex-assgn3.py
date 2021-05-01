@@ -3,7 +3,6 @@ import string
 from pprint import pprint
 from sklearn.feature_extraction import DictVectorizer
 from sklearn.linear_model import PassiveAggressiveClassifier
-from sklearn import preprocessing
 
 def get_sentences_from_file(filename, isTestSet):
     '''
@@ -160,6 +159,7 @@ def main():
     feature_vectors = v.transform(feature_dicts)
 
     print('Fitting Passive Aggresive Classifier...')
+    # explanation of this algorithm found at this URL: https://youtu.be/TJU8NfDdqNQ
     pass_agg = PassiveAggressiveClassifier(verbose=True)
     pass_agg.fit(feature_vectors, correct_tags)
 
@@ -169,10 +169,6 @@ def main():
     print('Making predictions on test set...')
     # loop through all test sentences
     for i, sentence in enumerate(test_sentences):
-        # curr_sentence_preds = []
-        # for token, _ in sentence:
-        #     curr_sentence_preds.append([token, 'prediction here'])
-        # test_sentences[i] = curr_sentence_preds
         # loop through all tokens in sentence
         for j, (token, pred) in enumerate(test_sentences[i]):
             # get feature dictionary for current token
