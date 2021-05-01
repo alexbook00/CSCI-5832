@@ -2,175 +2,194 @@ import numpy as np
 import string
 from pprint import pprint
 from sklearn.feature_extraction import DictVectorizer
-from sklearn.linear_model import SGDClassifier, PassiveAggressiveClassifier
-from sklearn.svm import SVC
+from sklearn.linear_model import PassiveAggressiveClassifier
 from sklearn import preprocessing
 
-le = {}
-
-words = []
-
-def get_sentences_from_file(filename):
+def get_sentences_from_file(filename, isTestSet):
+    '''
+    :param filename: name of file from which sentences are to be read in
+    :param isTestSet: keyword arg based on whether or not correct tags should be expected
+    :return: returns list of sentences, each of which is a list of 3-tuples of its tokens (position, token, correct tag)
+    '''
     with open(filename) as f:
-        unique_words = set()
         sentences = []
         tokens = []
         for line in f:
-            # if empty line (new sentence) clear the tokens array
             if line == '\n':
                 sentences.append(tokens)
                 tokens = []
-                # break
             else:
                 token = line.split()
-                tokens.append(token)
-                unique_words.add(token[1].lower())
-    return sentences, unique_words
+                if isTestSet:
+                    token.append('prediction here')
+                tokens.append(token[1:])
+    return sentences
 
-def has_punct(word):
-    for char in word:
+def has_punct(token):
+    '''
+    :param token: token for which punctuation will be checked
+    :return: returns bool stating whether or not the given token contains punctuation
+    '''
+    for char in token:
         if char in string.punctuation:
             return True
     return False
 
-def has_digit(word):
-    for char in word:
+def has_digit(token):
+    '''
+    :param token: token for which digits will be checked
+    :return: returns bool stating whether or not the given token contains any digits
+    '''
+    for char in token:
         if char.isdigit():
             return True
     return False
 
-def sentence_to_feature_dicts(sentence):
+def token_to_features(sentence, i):
     '''
-    :param sentence: list of 3-tuples of the form (position in sentence, word, correct IOB tag)
-    :return: returns feature dictionary
+    :param sentence: array of tuples of the form (token, correct tag), but correct tag is replaced by
+    a non-descript string ('prediction here') if getting features for test set
     '''
-    global le
-    feature_dict_list = []
+    # inspiration for this function can be found at the following URLs:
+    # https://sklearn-crfsuite.readthedocs.io/en/latest/tutorial.html
+    # http://ceur-ws.org/Vol-1691/paper_10.pdf
+    # https://nlp.stanford.edu/pubs/nested-ner.pdf
 
-    for i, (position, word, tag) in enumerate(sentence):
+    token = sentence[i][0]
 
-        # ideas for feature dictionary taken from the following URLs:
-        # https://sklearn-crfsuite.readthedocs.io/en/latest/tutorial.html#training
-        # http://ceur-ws.org/Vol-1691/paper_10.pdf
-        # https://nlp.stanford.edu/pubs/nested-ner.pdf
-        position = int(position)
-        features = {
-            'bias': 1.0,
-            # suffixes
-            'word[-4:]': word[-4:] if len(word) > 3 else '', # could also try these as 0 or None
-            'word[-3:]': word[-3:] if len(word) > 2 else '',
-            'word[-2:]': word[-2:] if len(word) > 1 else '',
-            # prefixes
-            'word[:-4]': word[:-4] if len(word) > 3 else '',
-            'word[:-3]': word[:-3] if len(word) > 2 else '',
-            'word[:-2]': word[:-2] if len(word) > 1 else '',
-            # 'word.lower()': le[word.lower()] if word.lower() in le.keys() else 0,
-            'word.lower()': word.lower(),
-            'word.isupper()': word.isupper(),
-            'word.istitle()': word.istitle(),
-            'word.isdigit()': word.isdigit(),
-            'word.length()': len(word),
-            'word.has_punct()': has_punct(word),
-            'word.has_digit()': has_digit(word),
-        }
-        if position > 1:
-            # get previous 3 words and tags (if/when applicable)
-            word1before = sentence[i-1][1]
-            tag1before = sentence[i-1][2]
+    features = {
+        'bias': 1.0,
+        # suffixes
+        'token[-4:]': token[-4:] if len(token) > 3 else '', # could also try these as 0 or None
+        'token[-3:]': token[-3:] if len(token) > 2 else '',
+        'token[-2:]': token[-2:] if len(token) > 1 else '',
+        # prefixes
+        'token[:-4]': token[:-4] if len(token) > 3 else '',
+        'token[:-3]': token[:-3] if len(token) > 2 else '',
+        'token[:-2]': token[:-2] if len(token) > 1 else '',
+        # token in lowercase
+        'token.lower()': token.lower(),
+        # if token is in all uppercase
+        'token.isupper()': token.isupper(),
+        # if token's first letter is capitalized
+        'token.istitle()': token.istitle(),
+        # if token is a number
+        'token.isdigit()': token.isdigit(),
+        # length of token
+        'token.length()': len(token),
+        # if token has punctuation
+        'token.has_punct()': has_punct(token),
+        # if token has digits
+        'token.has_digit()': has_digit(token),
+    }
+    if i > 0:
+        # get previous 3 tokens and tags (if/when applicable)
+        # for the training set, this will use the given correct tags
+        # for the test set, this will use the predicted tags
+        token1before = sentence[i-1][0]
+        tag1before = sentence[i-1][1]
+        features.update({
+            'token1before.lower()': token1before.lower(),
+            'token1before.length()': len(token1before),
+            'tag1before': tag1before,
+        })
+        if i > 1:
+            token2before = sentence[i-2][0]
+            tag2before = sentence[i-2][1]
             features.update({
-                # 'word1before.lower()': le[word1before.lower()] if word1before.lower() in le.keys() else 0,
-                'word1before.lower()': word1before.lower(),
-                'word1before.length()': len(word1before),
-                'tag1before': tag1before,
+                'token2before.lower()': token2before.lower(),
+                'token2before.length()': len(token2before),
+                'tag2before': tag2before,
             })
-            if position > 2:
-                word2before = sentence[i-2][1]
-                tag2before = sentence[i-2][2]
+            if i > 2:
+                token3before = sentence[i-3][0]
+                tag3before = sentence[i-3][1]
                 features.update({
-                    # 'word2before.lower()': le[word2before.lower()] if word2before.lower() in le.keys() else 0,
-                    'word2before.lower()': word2before.lower(),
-                    'word2before.length()': len(word2before),
-                    'tag2before': tag2before,
+                    'token3before.lower()': token3before.lower(),
+                    'token3before.length()': len(token3before),
+                    'tag3before': tag3before,
                 })
-                if position > 3:
-                    word3before = sentence[i-3][1]
-                    tag3before = sentence[i-3][2]
-                    features.update({
-                        # 'word3before.lower()': le[word3before.lower()] if word3before.lower() in le.keys() else 0,
-                        'word3before.lower()': word3before.lower(),
-                        'word3before.length()': len(word3before),
-                        'tag3before': tag3before,
-                    })
-        else:
-            features['beginning'] = True
+    else:
+        features['beginning'] = True
 
-        if position < len(sentence):
-            # get next 3 words and tags (if/when applicable)
-            word1after = sentence[i+1][1]
-            tag1after = sentence[i+1][2]
+    if i < len(sentence)-1:
+        # get next 3 tokens and tags (if/when applicable)
+        # not using tags after the current token, as this wouldn't be achievable on the test set
+        token1after = sentence[i+1][0]
+        features.update({
+            'token1after.lower()': token1after.lower(),
+            'token1after.length()': len(token1after),
+        })
+        if i < len(sentence)-2:
+            token2after = sentence[i+2][0]
             features.update({
-                # 'word1after.lower()': le[word1after.lower()] if word1after.lower() in le.keys() else 0,
-                'word1after.lower()': word1after.lower(),
-                'word1after.length()': len(word1after),
+                'token2after.lower()': token2after.lower(),
+                'token2after.length()': len(token2after),
             })
-            if position < len(sentence)-1:
-                word2after = sentence[i+2][1]
-                tag2after = sentence[i+2][2]
+            if i < len(sentence)-3:
+                token3after = sentence[i+3][0]
                 features.update({
-                    # 'word2after.lower()': le[word2after.lower()] if word2after.lower() in le.keys() else 0,
-                    'word2after.lower()': word2after.lower(),
-                    'word2after.length()': len(word2after),
+                    'token3after.lower()': token3after.lower(),
+                    'token3after.length()': len(token3after),
                 })
-                if position < len(sentence)-2:
-                    word3after = sentence[i+3][1]
-                    tag3after = sentence[i+3][2]
-                    features.update({
-                        # 'word3after.lower()': le[word3after.lower()] if word3after.lower() in le.keys() else 0,
-                        'word3after.lower()': word3after.lower(),
-                        'word3after.length()': len(word3after),
-                    })
-        else:
-            features['end'] = True
+    else:
+        features['end'] = True
 
-        feature_dict_list.append(features)
-
-    return feature_dict_list
+    return features
 
 def main():
-    global le
-    print('Creating feature dictionaries...')
-    sentences, unique_words = get_sentences_from_file('S21-gene-train.txt')
-
-    le = {word:i for i,word in enumerate(unique_words, 1)}
+    print('Getting training sentences...')
+    # list of list of tuples of the form (token, correct tag)
+    sentences = get_sentences_from_file('S21-gene-train.txt', False)
 
     print('Getting feature dicts...')
-    correct_tags = [] # list of all 3-tuples
+    correct_tags = []
     feature_dicts = []
-    for sentence in sentences:
-        feature_dicts.extend(sentence_to_feature_dicts(sentence))
-        for token in sentence:
-            correct_tags.append(token[-1])
-
+    for i, sentence in enumerate(sentences):
+        for j, token in enumerate(sentence):
+            correct_tags.append(sentence[j][-1])
+            features = token_to_features(sentence, j)
+            feature_dicts.append(features)
 
     print('Fitting DictVectorizer...')
+    # uses sklearn's DictVectorizer to turn the feature dictionaries into usable (numerical) feature vectors
     v = DictVectorizer(sparse=True)
     x = v.fit_transform(feature_dicts)
 
-    import os, psutil
-    process = psutil.Process(os.getpid())
-    print(process.memory_info().rss)
-
     print('Creating feature vectors...')
-    # feature_vectors = []
     feature_vectors = v.transform(feature_dicts)
-    print(feature_vectors.shape)
-    # for f_dict in feature_dicts:
-    #     # f_vect = np.matrix(v.transform(f_dict).toarray())
-    #     feature_vectors.append(v.transform(f_dict))
 
-    print('Fitting SGDClassifier...')
-    clf = PassiveAggressiveClassifier(verbose=True)
-    clf.fit(feature_vectors, correct_tags)
+    print('Fitting Passive Aggresive Classifier...')
+    pass_agg = PassiveAggressiveClassifier(verbose=True)
+    pass_agg.fit(feature_vectors, correct_tags)
+
+    print('Getting testing sentences...')
+    test_sentences = get_sentences_from_file('S21-gene-test.txt', True)
+
+    print('Making predictions on test set...')
+    # loop through all test sentences
+    for i, sentence in enumerate(test_sentences):
+        # curr_sentence_preds = []
+        # for token, _ in sentence:
+        #     curr_sentence_preds.append([token, 'prediction here'])
+        # test_sentences[i] = curr_sentence_preds
+        # loop through all tokens in sentence
+        for j, (token, pred) in enumerate(test_sentences[i]):
+            # get feature dictionary for current token
+            features = token_to_features(test_sentences[i], j)
+            # vectorize feature dictionary
+            feature_vec = v.transform(features)
+            # make prediction using trained model
+            curr_prediction = pass_agg.predict(feature_vec)
+            # store prediction by replacing 'prediction here' in the current tuple
+            test_sentences[i][j] = [token, curr_prediction]
+
+    print('Writing predictions to output file...')
+    with open('Book-Alex-assgn3-out.txt', 'w') as f:
+        for sentence in test_sentences:
+            for i, (token, curr_prediction) in enumerate(sentence):
+                f.write('{} \t {} \t {} \n'.format(i+1, token, curr_prediction[0]))
+            f.write('\n')
 
     return
 
